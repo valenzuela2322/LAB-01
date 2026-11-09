@@ -1,0 +1,31 @@
+# Preguntas de Reflexión — LAB-01 (Unidad III: PostgreSQL)
+
+### 1. ¿Por qué la auditoría no puede configurarse "después" de un incidente para investigarlo?
+Las bitácoras del servidor y los disparadores (*triggers*) 
+a nivel de dato capturan y registran las operaciones exclusivamente en tiempo real, al momento exacto en que son ejecutadas. Si un dato sensible fue alterado o eliminado mientras la auditoría estaba desactivada o sin registro de valores previos, no queda almacenado ningún historial en el motor de la base de datos que permita reconstruir qué usuario ejecutó la acción ni qué valor tenía el registro antes del cambio.
+
+---
+
+### 2. ¿Por qué conviene que la bitácora la administre el propio servidor y no el mecanismo de despliegue (como la salida estándar de Docker o systemd)?
+Al activar el colector interno de bitácoras (`logging_collector = on`),
+el motor de PostgreSQL asume el control directo y la gestión de sus archivos de registro en disco. Esto asegura la rotación automática de archivos por tamaño o tiempo, garantiza la persistencia e inalterabilidad de los datos ante reinicios o cierres abruptos del contenedor/servicio, y permite aislar los permisos de acceso directamente desde el sistema operativo.
+
+---
+
+### 3. ¿Por qué el prefijo de línea (`log_line_prefix`) es tan importante como el nivel de `log_statement`?
+El parámetro `log_statement` únicamente especifica *qué tipo de comandos* deben escribirse en el archivo de bitácora (por ejemplo, `ddl` o `all`). Sin embargo, `log_line_prefix` aporta todo el contexto forense indispensable para atribuir la responsabilidad del evento: la marca de tiempo exacta (`%m`), el ID del proceso (`%p`), el usuario autenticado (`%u`), la base de datos de trabajo (`%d`), el nombre de la aplicación (`%a`) y la dirección IP de origen (`%h`). Sin el prefijo, se sabría cuál sentencia se ejecutó pero no quién la corrió ni desde dónde.
+
+---
+
+### 4. ¿Qué diferencia práctica hay entre registrar la sentencia (`log_statement`) y registrar el cambio en el dato (disparador con JSONB)?
+El registro de sentencias en la bitácora (`log_statement`) guarda la consulta SQL en texto plano enviada por el cliente (por ejemplo, `UPDATE clientes SET rfc = ...`), pero no almacena el estado de los datos previa a la transacción. En cambio, el disparador (*trigger*) con `JSONB` toma una "fotografía" completa de la fila antes (`OLD`) y después (`NEW`) de ser modificada, permitiendo realizar análisis forenses profundos para identificar qué campos específicos cambiaron y qué valores contenían.
+
+---
+
+### 5. ¿Qué evidencia ofrece `pg_stat_activity` que no ofrece la bitácora, y viceversa?
+La vista de sistema `pg_stat_activity` proporciona una radiografía del **estado presente e instantáneo** de la base de datos (conexiones abiertas en ese milisegundo exacto, bloqueos y consultas en ejecución activa), pero no guarda un historial de las operaciones que ya finalizaron. Por el contrario, la bitácora del servidor es un **registro histórico y permanente** de todos los eventos pasados, incluyendo transacciones y conexiones que ya fueron cerradas.
+
+---
+
+### 6. Si el administrador (superusuario) puede cambiar `log_statement` a `none` y desactivar el disparador, ¿quién audita al administrador?
+Puesto que el superusuario ostenta control y privilegios totales dentro del motor, la auditoría sobre la cuenta del administrador no se realiza desde la misma base de datos, sino aplicando **segregación de funciones externa**. Esto implica reenviar e ingestar los archivos de bitácora en tiempo real hacia un servidor centralizado de auditoría (SIEM / Syslog externo) donde la cuenta del DBA no posea permisos de modificación o borrado, además de monitorear sus actividades directamente a nivel de sistema operativo.
